@@ -1,0 +1,61 @@
+\documentclass{jsarticle}
+\usepackage[dvipdfmx]{graphicx}
+\usepackage{url}
+\usepackage{listings}
+\title{I2　情報第2部(考察レポート)}
+
+\author{工学部電気電子工学科　\\
+学籍番号03-190503 西山　晃人}
+\date{}
+\begin{document}
+\maketitle
+
+\section{考察}
+\subsection{接続してきたクライアントには、接続してきた時点以降サーバ付近でなっていた音のデータが送られるようにする}
+サーバ側で以下のようなコマンドでサーバを立ち上げ、recで録音したデータをサーバで読み込むようにすると
+\begin{lstlisting}[basicstyle=\ttfamily\footnotesize, frame=single]
+$ rec -t raw -b 16 -c 1 -e s -r 44100 - | ./serv_send ポート番号
+\end{lstlisting}
+
+クライアントで接続してそこで鳴る音はサーバをたてた時点からの音がなってしまう。それは、上記のコマンドを打つとサーバがacceptで待っていてかつrec自身は録音を開始している状態となるからである。そこでpopenというライブラリ関数(ソースコードによってターミナルでのコマンドを実行することができる)を使ってその問題の解決を図った。C言語のコード内で以下のように記述するとソースコードが上から実行され、これが記述された行に到達するとターミナル内でrecが実行される。(dieは自作の関数でpopenが適切になされないとerrorを検出してプログラムを終了することができる。)
+\begin{lstlisting}[basicstyle=\ttfamily\footnotesize, frame=single]
+#include <stdio.h>
+
+FILE *p;
+if((p=popen("rec -t raw -b 16 -c 1 -e s -r 44100 -", "r"))==NULL) die("popen");
+\end{lstlisting}
+またrecで録音されたデータはファイルポインタpでさされた場所に格納されることに注意する必要がある。これにより、ソースコードの任意の場所でrecを実行することで、任意のタイミングで録音することができる。
+
+\subsection{双方向通信の実現}
+次はサーバとクライアントで双方向通信ができるようにプログラムを作成する。
+
+サーバ
+\begin{lstlisting}[basicstyle=\ttfamily\footnotesize, frame=single]
+$ rec -t raw -b 16 -c 1 -e s -r 44100 - | ./serv_send ポート番号 | play -t raw 
+	-b 16 -c 1 -e s -r 44100 -
+\end{lstlisting}
+
+クライアント
+\begin{lstlisting}[basicstyle=\ttfamily\footnotesize, frame=single]
+$ rec -t raw -b 16 -c 1 -e s -r 44100 - | ./serv_send サーバアドレス　ポート番号
+	| play -t raw -b 16 -c 1 -e s -r 44100 -
+\end{lstlisting}
+
+上記のコマンドは実験教科書に記述されていたものでこれをサーバ、クライアント側で実行すると1秒経たない間に固まってしまい、プログラムが正常に動作しない。従来のソースコードではwhile文の中にrecvとsendを記述していた。この方法の場合、sendとrecvが交互に呼ばれ順番に実行されているためrecで録音される速度に対してwhile文内での処理速度が十分でない、recvとsendの処理でのメモリ領域でデータハザードを起こしているなどの問題点が考えられる。
+そこでpthreadというライブラリを用いて並列処理をすることにより、応答速度を改善し、メモリ領域での競合をなくすことを考え、以下のように記述した。ここでexe\_recv、exe\_sendは自作の関数であり、内部でwhile文を回すことによりrecvとsendをプログラム終了時まで行なっている。
+
+\begin{lstlisting}[basicstyle=\ttfamily\footnotesize, frame=single]
+#include <pthread.h>
+
+pthread_t pthread;
+pthread_create(&pthread, NULL, &exe_recv, &s);
+exe_send(s);
+pthread_join(pthread, NULL);
+\end{lstlisting}
+
+このように記述し並列処理を行うことにより約5分ほどの通話が可能であった。さらに長時間の通話は試していないが十分長い時間の通話が可能であると考えられる。
+
+\section{参考文献}
+[1] 電子情報工学科・電気電子工学科、「電気電子情報第一(前期)実験」、東京大学工学部(2019)
+\\
+\end{document}
